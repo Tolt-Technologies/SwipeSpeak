@@ -7,6 +7,11 @@
 //
 
 import Foundation
+#if os(iOS) || os(tvOS)
+import UIKit
+#elseif os(watchOS)
+import WatchKit
+#endif
 
 /// Enumerates the Local (`UserDefaults`) and Remote (`NSUNSUbiquitousKeyValueStore`) data stores
 private enum ZephyrDataStore {
@@ -26,8 +31,8 @@ public final class Zephyr: NSObject {
     /// If **true**, then `NSUbiquitousKeyValueStore.synchronize()` will be called immediately after any change is made.
     public static var syncUbiquitousKeyValueStoreOnChange = true
 
-    @available(*, deprecated: 2.2.1, unavailable, renamed: "syncUbiquitousKeyValueStoreOnChange")
-    public static var syncUbiquitousStoreKeyValueStoreOnChange = true
+    /// A string containing the notification name that will be posted when Zephyr receives updated data from iCloud.
+    public static let keysDidChangeOnCloudNotification = Notification.Name("ZephyrKeysDidChangeOnCloudNotification")
 
     /// The singleton for Zephyr.
     private static let shared = Zephyr()
@@ -62,12 +67,7 @@ public final class Zephyr: NSObject {
     /// Do not call this method directly.
     override init() {
         super.init()
-        NotificationCenter.default.addObserver(self, selector: #selector(keysDidChangeOnCloud(notification:)),
-                                               name: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
-                                               object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(willEnterForeground(notification:)),
-                                               name: UIApplication.willEnterForegroundNotification,
-                                               object: nil)
+        setupNotifications()
         NSUbiquitousKeyValueStore.default.synchronize()
     }
 
@@ -218,6 +218,34 @@ public final class Zephyr: NSObject {
 // MARK: - Helpers
 
 private extension Zephyr {
+
+    /// Setup UIApplication and UIScene event state notifications.
+    private func setupNotifications() {
+        NotificationCenter.default.addObserver(self, selector: #selector(keysDidChangeOnCloud(notification:)),
+                                               name: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+                                               object: nil)
+
+        #if os(iOS) || os(tvOS)
+        if #available(iOS 13.0, tvOS 13.0, *) {
+            NotificationCenter.default.addObserver(self, selector: #selector(willEnterForeground(notification:)),
+                                                   name: UIScene.willEnterForegroundNotification,
+                                                   object: nil)
+        }
+
+        NotificationCenter.default.addObserver(self, selector: #selector(willEnterForeground(notification:)),
+                                               name: UIApplication.willEnterForegroundNotification,
+                                               object: nil)
+        #endif
+        
+        #if os(watchOS)
+        if #available(watchOS 9.0, *) {
+            NotificationCenter.default.addObserver(self, selector: #selector(willEnterForeground(notification:)),
+                                                   name: WKExtension.applicationWillEnterForegroundNotification,
+                                                   object: nil)
+        }
+        #endif
+    }
+
     /// Compares the last sync date between `NSUbiquitousKeyValueStore` and `UserDefaults`.
     ///
     /// If no data exists in `NSUbiquitousKeyValueStore`, then `NSUbiquitousKeyValueStore` will synchronize with data from `UserDefaults`.
@@ -331,7 +359,7 @@ private extension Zephyr {
         guard let key = key else {
             for (key, value) in zephyrRemoteStoreDictionary {
                 unregisterObserver(key: key)
-                defaults.set(value, forKey: key)
+                DispatchQueue.main.async { defaults.set(value, forKey: key) }
                 Zephyr.printKeySyncStatus(key: key, value: value, destination: .local)
                 registerObserver(key: key)
             }
@@ -342,12 +370,14 @@ private extension Zephyr {
         unregisterObserver(key: key)
 
         if let value = value {
-            defaults.set(value, forKey: key)
+            DispatchQueue.main.async { defaults.set(value, forKey: key) }
             Zephyr.printKeySyncStatus(key: key, value: value, destination: .local)
         } else {
-            defaults.set(nil, forKey: key)
+            DispatchQueue.main.async { defaults.set(nil, forKey: key) }
             Zephyr.printKeySyncStatus(key: key, value: nil, destination: .local)
         }
+
+        Zephyr.postNotificationAfterSyncFromCloud()
 
         registerObserver(key: key)
     }
@@ -386,7 +416,7 @@ extension Zephyr {
             return
         }
 
-        if let index = registeredObservationKeys.index(of: key) {
+        if let index = registeredObservationKeys.firstIndex(of: key) {
 
             userDefaults.removeObserver(self, forKeyPath: key, context: nil)
             registeredObservationKeys.remove(at: index)
@@ -429,15 +459,22 @@ extension Zephyr {
         if notification.name == NSUbiquitousKeyValueStore.didChangeExternallyNotification {
             guard let userInfo = (notification as NSNotification).userInfo,
                 let cloudKeys = userInfo[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String],
-                let localStoredDate = zephyrLocalStoreDictionary[ZephyrSyncKey] as? Date,
-                let remoteStoredDate = zephyrRemoteStoreDictionary[ZephyrSyncKey] as? Date,
-                remoteStoredDate.timeIntervalSince1970 > localStoredDate.timeIntervalSince1970 else {
+                let remoteStoredDate = zephyrRemoteStoreDictionary[ZephyrSyncKey] as? Date else {
                     return
             }
 
-            for key in monitoredKeys where cloudKeys.contains(key) {
-                syncSpecificKeys(keys: [key], dataStore: .remote)
+            if let localStoredDate = zephyrLocalStoreDictionary[ZephyrSyncKey] as? Date,
+                !(remoteStoredDate.timeIntervalSince1970 > localStoredDate.timeIntervalSince1970) {
+                return
             }
+
+            zephyrQueue.sync {
+                for key in monitoredKeys where cloudKeys.contains(key) {
+                    syncSpecificKeys(keys: [key], dataStore: .remote)
+                }
+            }
+
+            Zephyr.postNotificationAfterSyncFromCloud()
         }
     }
 
@@ -510,5 +547,10 @@ private extension Zephyr {
         if debugEnabled == true {
             print("[Zephyr] \(status)")
         }
+    }
+
+    // Notify any observers that we have finished synchronizing an update from iCloud.
+    static func postNotificationAfterSyncFromCloud() {
+        NotificationCenter.default.post(name: Zephyr.keysDidChangeOnCloudNotification, object: nil)
     }
 }

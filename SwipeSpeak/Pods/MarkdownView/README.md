@@ -1,22 +1,54 @@
 # MarkdownView
 
 [![CI Status](http://img.shields.io/travis/keitaoouchi/MArkdownView.svg?style=flat)](https://travis-ci.org/keitaoouchi/MarkdownView)
-[![Swift 4.0](https://img.shields.io/badge/Swift-4.0-orange.svg?style=flat)](https://swift.org/)
+[![Swift 5.2](https://img.shields.io/badge/Swift-5.2-orange.svg?style=flat)](https://swift.org/)
 [![Carthage compatible](https://img.shields.io/badge/Carthage-compatible-4BC51D.svg?style=flat)](https://github.com/Carthage/Carthage)
 [![Version](https://img.shields.io/cocoapods/v/MarkdownView.svg?style=flat)](http://cocoapods.org/pods/MarkdownView)
 [![License](https://img.shields.io/cocoapods/l/MarkdownView.svg?style=flat)](http://cocoapods.org/pods/MarkdownView)
+[![Swift Package Manager compatible](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg)](https://github.com/apple/swift-package-manager)
 
-> MarkdownView is a WKWebView based UI element, and internally use bootstrap, highlight.js, markdown-it.
+> MarkdownView is a WKWebView based UI element, and internally use markdown-it, highlight-js.
 
 ![GIF](https://github.com/keitaoouchi/MarkdownView/blob/master/sample.gif "GIF")
 
 ## How to use
+
+#### UIViewController
 
 ```swift
 import MarkdownView
 
 let md = MarkdownView()
 md.load(markdown: "# Hello World!")
+```
+
+#### SwiftUI
+
+```swift
+import SwiftUI
+import MarkdownView
+
+struct SampleUI: View {
+  var body: some View {
+    ScrollView {        
+      MarkdownUI(body: markdown)
+        .onTouchLink { link in 
+          print(link)
+          return false
+        }
+        .onRendered { height in 
+          print(height)
+        }
+    }
+  }
+  
+  private var markdown: String {
+    let path = Bundle.main.path(forResource: "sample", ofType: "md")!
+    let url = URL(fileURLWithPath: path)
+    return try! String(contentsOf: url, encoding: String.Encoding.utf8)
+  }
+}
+
 ```
 
 ### Options
@@ -46,16 +78,44 @@ md.onTouchLink = { [weak self] request in
 }
 ```
 
+### Experimental Features
+
+This is not stable :bow:
+
+#### Custom CSS Styling
+
+Please check [Example/ViewController/CustomCss.swift](https://github.com/keitaoouchi/MarkdownView/blob/master/Example/Example/ViewController/CustomCss.swift). 
+
+<img src="https://github.com/keitaoouchi/MarkdownView/blob/master/sample_css.png" width=300>
+
+#### Plugins
+
+Please check [Example/ViewController/Plugins.swift](https://github.com/keitaoouchi/MarkdownView/blob/master/Example/Example/ViewController/Plugins.swift). 
+Each plugin should be self-contained, with no external dependent plugins.
+
+<img src="https://github.com/keitaoouchi/MarkdownView/blob/master/sample_plugin.png" width=300>
+
+[Here](https://github.com/keitaoouchi/markdownview-sample-plugin) is a sample project that builds `markdown-it-new-katex` as a compatible library.
+
 ## Requirements
 
 | Target            | Version |
 |-------------------|---------|
-| iOS               |  => 9.0 |
-| Swift             |  => 4.0 |
+| iOS               |  => 13.0 |
+| Swift             |  => 5.2 |
 
 ## Installation
 
-MarkdownView is available through [CocoaPods](http://cocoapods.org) or [Carthage](https://github.com/Carthage/Carthage).
+MarkdownView is available through [Swift Package Manager](https://swift.org/package-manager/) or [CocoaPods](http://cocoapods.org) or [Carthage](https://github.com/Carthage/Carthage).
+
+### Swift Package Manager
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/keitaoouchi/MarkdownView.git", from: "1.7.1")
+]
+```
+Alternatively, you can add the package directly via Xcode.
 
 ### CocoaPods
 
